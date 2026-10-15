@@ -12,7 +12,7 @@ A personal iPhone flashcard app for learning Spanish. Think Duolingo, but you fe
    - A card counts as **learned** after 3 right answers in a row.
 5. **Built-in basics**: 15 starter decks, 330+ cards (greetings, numbers, days and months, time and weather, colors, pronouns, articles and gender, ser vs estar, common verbs, present tense patterns, question words, food, family, directions, survival phrases).
 
-6. **Profile**: day streak, swipes today, accuracy over the last 7 days, an activity chart, and progress per deck.
+6. **Profile**: day streak, swipes today, accuracy over the last 7 days, an activity chart, progress per deck, and a **daily practice reminder** (pick the time, default 7pm) that says how many cards are waiting.
 
 New cards per session (default: all of them), deck filter and English-first mode (on by default) are on the Study screen. When nothing is due you can still do extra practice.
 
@@ -44,7 +44,6 @@ CI builds the app and runs the tests on a macOS runner for every push and PR.
 
 ## Ideas for later
 - [ ] iCloud sync between devices
-- [ ] Daily reminder notification
 - [ ] Type-the-answer mode
 - [ ] Import cards from CSV
 - [ ] Verb conjugation drills

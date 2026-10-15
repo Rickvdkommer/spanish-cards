@@ -159,3 +159,39 @@ final class ProgressStatsTests: XCTestCase {
         XCTAssertEqual(week.reduce(0) { $0 + $1.total }, 3)
     }
 }
+
+final class DailyReminderTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+    private let now = Date(timeIntervalSince1970: 1_800_000_000) // 08:00 UTC
+
+    func testOneReminderPerDayAtThePickedTime() {
+        let plans = DailyReminder.plan(now: now, hour: 19, minute: 30, reviewDueDates: [], newCards: 5, practicedToday: false, days: 7, calendar: calendar)
+        XCTAssertEqual(plans.count, 7)
+        let first = calendar.dateComponents([.hour, .minute], from: plans[0].fireDate)
+        XCTAssertEqual(first.hour, 19)
+        XCTAssertEqual(first.minute, 30)
+        XCTAssertEqual(calendar.startOfDay(for: plans[0].fireDate), calendar.startOfDay(for: now))
+    }
+
+    func testTimeAlreadyPassedTodayStartsTomorrow() {
+        let plans = DailyReminder.plan(now: now, hour: 7, minute: 0, reviewDueDates: [], newCards: 0, practicedToday: false, days: 3, calendar: calendar)
+        XCTAssertEqual(plans.count, 2)
+        XCTAssertGreaterThan(plans[0].fireDate, now)
+    }
+
+    func testCountsCardsDueByEachReminder() {
+        let dueDates = [now, now.addingTimeInterval(86_400)]
+        let plans = DailyReminder.plan(now: now, hour: 19, minute: 0, reviewDueDates: dueDates, newCards: 0, practicedToday: false, days: 2, calendar: calendar)
+        XCTAssertEqual(plans.map(\.body), [DailyReminder.message(due: 1, newCards: 0), DailyReminder.message(due: 2, newCards: 0)])
+    }
+
+    func testSkipsTodayWhenAlreadyPracticedAndNothingDue() {
+        let plans = DailyReminder.plan(now: now, hour: 19, minute: 0, reviewDueDates: [], newCards: 10, practicedToday: true, days: 3, calendar: calendar)
+        XCTAssertEqual(plans.count, 2)
+        XCTAssertGreaterThan(calendar.startOfDay(for: plans[0].fireDate), calendar.startOfDay(for: now))
+    }
+}

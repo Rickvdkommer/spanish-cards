@@ -1,12 +1,18 @@
 import SwiftUI
 import SwiftData
 import Charts
+import UIKit
 
 struct ProfileView: View {
+    @Environment(\.modelContext) private var context
     @Query private var cards: [Card]
     @Query(sort: \ReviewLog.date) private var logs: [ReviewLog]
     @AppStorage("profileName") private var name = ""
+    @AppStorage(DailyReminder.enabledKey) private var reminderEnabled = false
+    @AppStorage(DailyReminder.hourKey) private var reminderHour = DailyReminder.defaultHour
+    @AppStorage(DailyReminder.minuteKey) private var reminderMinute = 0
     @State private var isEditingName = false
+    @State private var notificationsDenied = false
 
     var body: some View {
         NavigationStack {
@@ -14,6 +20,7 @@ struct ProfileView: View {
                 VStack(spacing: 16) {
                     header
                     tiles
+                    reminder
                     overallProgress
                     activityChart
                     deckProgress
@@ -68,6 +75,66 @@ struct ProfileView: View {
             BigStat(icon: "hand.draw.fill", tint: .blue, value: "\(reviewsToday)", label: "swipes today")
             BigStat(icon: "target", tint: .purple, value: accuracyText, label: "right, last 7 days")
         }
+    }
+
+    private var reminder: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: reminderToggle) {
+                Label("Daily practice reminder", systemImage: "bell.badge.fill")
+                    .font(.headline)
+            }
+            if reminderEnabled {
+                DatePicker("Remind me at", selection: reminderTime, displayedComponents: .hourAndMinute)
+                Text("You'll get a nudge with how many cards are waiting. Skipped if you already practiced and nothing's due.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if notificationsDenied {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Notifications are off for Spanish Cards. Turn them on in Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        Link("Open Settings", destination: url)
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+            }
+        }
+        .card()
+    }
+
+    private var reminderToggle: Binding<Bool> {
+        Binding(
+            get: { reminderEnabled },
+            set: { isOn in
+                guard isOn else {
+                    reminderEnabled = false
+                    DailyReminder.refresh(context: context)
+                    return
+                }
+                Task { @MainActor in
+                    let granted = await DailyReminder.requestPermission()
+                    reminderEnabled = granted
+                    notificationsDenied = !granted
+                    DailyReminder.refresh(context: context)
+                }
+            }
+        )
+    }
+
+    private var reminderTime: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(bySettingHour: reminderHour, minute: reminderMinute, second: 0, of: .now) ?? .now
+            },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                reminderHour = parts.hour ?? DailyReminder.defaultHour
+                reminderMinute = parts.minute ?? 0
+                DailyReminder.refresh(context: context)
+            }
+        )
     }
 
     private var overallProgress: some View {
