@@ -6,8 +6,9 @@ struct StudyView: View {
 
     @Environment(\.modelContext) private var context
     @Query(sort: \Card.createdAt) private var cards: [Card]
-    @AppStorage("newCardsPerSession") private var newPerSession = 10
-    @AppStorage("showEnglishFirst") private var englishFirst = false
+    /// `Int.max` means no limit: every new card in the deck goes into the session.
+    @AppStorage("newCardsLimit") private var newPerSession = Int.max
+    @AppStorage("englishFirst") private var englishFirst = true
     @AppStorage("studyDeck") private var selectedDeck = StudyView.allDecks
 
     @State private var session: StudySession?
@@ -20,9 +21,16 @@ struct StudyView: View {
                 .background(Color(.systemGroupedBackground))
                 .navigationTitle("Study")
                 .toolbar {
-                    if session != nil {
+                    if let session {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button(action: undo) {
+                                Image(systemName: "arrow.uturn.backward.circle")
+                            }
+                            .disabled(!session.canUndo)
+                            .accessibilityLabel("Back to the last card")
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("End") { session = nil }
+                            Button("End") { self.session = nil }
                         }
                     }
                 }
@@ -73,8 +81,17 @@ struct StudyView: View {
                 Toggle("Show English first", isOn: $englishFirst)
                     .padding(.vertical, 10)
                 Divider()
-                Stepper("New cards per session: \(newPerSession)", value: $newPerSession, in: 0...50, step: 5)
-                    .padding(.vertical, 10)
+                HStack {
+                    Text("New cards per session")
+                    Spacer()
+                    Picker("New cards per session", selection: $newPerSession) {
+                        ForEach([10, 20, 50, 100], id: \.self) { Text("\($0)").tag($0) }
+                        Text("All").tag(Int.max)
+                        Text("None").tag(0)
+                    }
+                    .pickerStyle(.menu)
+                }
+                .padding(.vertical, 6)
             }
             .padding(.horizontal)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -132,7 +149,7 @@ struct StudyView: View {
     }
 
     private var scheduledCards: [Card] {
-        Array(dueCards.prefix(200)) + Array(newCards.prefix(newPerSession))
+        dueCards + Array(newCards.prefix(newPerSession))
     }
 
     private func card(withID id: UUID) -> Card? {
@@ -151,13 +168,38 @@ struct StudyView: View {
 
     private func answer(_ card: Card, correct: Bool) {
         guard var current = session else { return }
+        let previousState = card.reviewState
+        let previousReviewedAt = card.lastReviewedAt
         // In extra practice a right answer doesn't push the card further out, a wrong one still counts.
         let counts = !(current.isPractice && correct)
         if counts {
             card.record(correct: correct)
         }
+        let log = ReviewLog(cardUID: card.uid, correct: correct)
+        context.insert(log)
         let repeatSoon = !correct || (counts && ReviewScheduler.repeatsThisSession(card.reviewState))
-        current.answer(correct: correct, repeatSoon: repeatSoon)
+        current.answer(
+            correct: correct,
+            repeatSoon: repeatSoon,
+            previousState: counts ? previousState : nil,
+            previousReviewedAt: previousReviewedAt,
+            logID: log.uid
+        )
+        session = current
+        try? context.save()
+    }
+
+    /// Back to the last card: it goes back on top and its progress is put back as it was.
+    private func undo() {
+        guard var current = session else { return }
+        guard let restore = current.undo() else { return }
+        if let previous = restore.previousState, let card = card(withID: restore.cardID) {
+            card.reviewState = previous
+            card.lastReviewedAt = restore.previousReviewedAt
+        }
+        if let logID = restore.logID {
+            try? context.delete(model: ReviewLog.self, where: #Predicate<ReviewLog> { $0.uid == logID })
+        }
         session = current
         try? context.save()
     }

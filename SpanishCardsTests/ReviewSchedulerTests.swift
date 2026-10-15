@@ -92,3 +92,70 @@ final class StarterDecksTests: XCTestCase {
         }
     }
 }
+
+final class StudySessionUndoTests: XCTestCase {
+    private let ids = (0..<4).map { _ in UUID() }
+
+    func testUndoPutsLastCardBackOnTopWithItsOldState() {
+        var session = StudySession(cardIDs: ids)
+        let before = ReviewState.new()
+        session.answer(correct: true, repeatSoon: false, previousState: before)
+        session.answer(correct: false, repeatSoon: true, previousState: before)
+        XCTAssertEqual(session.reviewed, 2)
+
+        let restore = session.undo()
+        XCTAssertEqual(restore?.cardID, ids[1])
+        XCTAssertEqual(restore?.previousState, before)
+        XCTAssertEqual(session.queue, [ids[1], ids[2], ids[3]])
+        XCTAssertEqual(session.reviewed, 1)
+        XCTAssertEqual(session.correct, 1)
+
+        XCTAssertEqual(session.undo()?.cardID, ids[0])
+        XCTAssertEqual(session.queue, ids)
+        XCTAssertFalse(session.canUndo)
+        XCTAssertNil(session.undo())
+    }
+
+    func testUndoWorksFromTheEndOfTheSession() {
+        var session = StudySession(cardIDs: [ids[0]])
+        session.answer(correct: true, repeatSoon: false)
+        XCTAssertNil(session.current)
+        session.undo()
+        XCTAssertEqual(session.current, ids[0])
+    }
+}
+
+final class ProgressStatsTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+    private let now = Date(timeIntervalSince1970: 1_800_000_000) // 08:00 UTC
+    private func daysAgo(_ days: Int) -> Date { now.addingTimeInterval(-Double(days) * 86_400) }
+
+    func testStreakCountsConsecutiveDaysEndingToday() {
+        let dates = [now, daysAgo(1), daysAgo(1), daysAgo(2), daysAgo(4)]
+        XCTAssertEqual(ProgressStats.dayStreak(reviewDates: dates, now: now, calendar: calendar), 3)
+    }
+
+    func testStreakSurvivesUntilTodayIsOver() {
+        let dates = [daysAgo(1), daysAgo(2)]
+        XCTAssertEqual(ProgressStats.dayStreak(reviewDates: dates, now: now, calendar: calendar), 2)
+    }
+
+    func testStreakIsZeroAfterAMissedDay() {
+        XCTAssertEqual(ProgressStats.dayStreak(reviewDates: [daysAgo(2)], now: now, calendar: calendar), 0)
+        XCTAssertEqual(ProgressStats.dayStreak(reviewDates: [], now: now, calendar: calendar), 0)
+    }
+
+    func testActivityHasOneEntryPerDayOldestFirst() {
+        let reviews: [(date: Date, correct: Bool)] = [(now, true), (now, false), (daysAgo(6), true), (daysAgo(9), true)]
+        let week = ProgressStats.activity(lastDays: 7, reviews: reviews, now: now, calendar: calendar)
+        XCTAssertEqual(week.count, 7)
+        XCTAssertEqual(week.first?.correct, 1)
+        XCTAssertEqual(week.last?.correct, 1)
+        XCTAssertEqual(week.last?.wrong, 1)
+        XCTAssertEqual(week.reduce(0) { $0 + $1.total }, 3)
+    }
+}

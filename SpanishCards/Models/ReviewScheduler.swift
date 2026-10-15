@@ -65,11 +65,27 @@ enum ReviewScheduler {
 }
 
 /// The queue of cards for one study session. Missed cards are slotted back in a few cards later,
-/// cards that are due again soon go to the back of the line.
+/// cards that are due again soon go to the back of the line. Every answer can be undone.
 struct StudySession {
+    /// What a card looked like before an answer, so undo can put it back.
+    struct Undo: Equatable {
+        let cardID: UUID
+        let previousState: ReviewState?
+        let previousReviewedAt: Date?
+        let logID: UUID?
+    }
+
+    private struct Snapshot {
+        let queue: [UUID]
+        let reviewed: Int
+        let correct: Int
+        let undo: Undo
+    }
+
     private(set) var queue: [UUID]
     private(set) var reviewed = 0
     private(set) var correct = 0
+    private var history: [Snapshot] = []
     /// Extra practice when nothing is due: right answers don't push cards further out.
     let isPractice: Bool
 
@@ -80,14 +96,38 @@ struct StudySession {
 
     var current: UUID? { queue.first }
     var remaining: Int { queue.count }
+    var canUndo: Bool { !history.isEmpty }
 
-    mutating func answer(correct isCorrect: Bool, repeatSoon: Bool) {
-        guard !queue.isEmpty else { return }
-        let id = queue.removeFirst()
+    /// `previousState` is the card's state before this answer (nil when the answer didn't change it).
+    mutating func answer(
+        correct isCorrect: Bool,
+        repeatSoon: Bool,
+        previousState: ReviewState? = nil,
+        previousReviewedAt: Date? = nil,
+        logID: UUID? = nil
+    ) {
+        guard let id = queue.first else { return }
+        history.append(Snapshot(
+            queue: queue,
+            reviewed: reviewed,
+            correct: correct,
+            undo: Undo(cardID: id, previousState: previousState, previousReviewedAt: previousReviewedAt, logID: logID)
+        ))
+        queue.removeFirst()
         reviewed += 1
         if isCorrect { correct += 1 }
         guard repeatSoon else { return }
         let position = isCorrect ? queue.count : min(ReviewScheduler.wrongRequeueOffset, queue.count)
         queue.insert(id, at: position)
+    }
+
+    /// Puts the last answered card back on top and returns what the card needs restored.
+    @discardableResult
+    mutating func undo() -> Undo? {
+        guard let last = history.popLast() else { return nil }
+        queue = last.queue
+        reviewed = last.reviewed
+        correct = last.correct
+        return last.undo
     }
 }
